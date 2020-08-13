@@ -23,7 +23,8 @@ interface Dimensions {
   depth: number;
 }
 
-export function vertexShaderSource() {
+export function vertexShaderSource(rotation: number) {
+  const rotateAngle = rotation === 0 ? "0." : rotation * (Math.PI / 180);
   return `#version 300 es
 precision highp float;
 precision highp int;
@@ -32,34 +33,47 @@ in vec2 position;
 in vec2 texCoords;
 out vec2 uv;
 
+vec2 rotate(vec2 uvCoods, vec2 pivot, float rotation) {
+  float cosa = cos(rotation);
+  float sina = sin(rotation);
+  uvCoods -= pivot;
+  return vec2(
+      cosa * uvCoods.x - sina * uvCoods.y,
+      cosa * uvCoods.y + sina * uvCoods.x
+  ) + pivot;
+}
+
 void main() {
-  uv = texCoords;
+  uv = rotate(texCoords, vec2(0.5), ${rotateAngle});
   gl_Position = vec4(position, 0, 1);
 }`;
 }
 
 export function fragmentShaderSource(
-    sourceDims: Dimensions, targetDims: Dimensions, alignCorners: boolean) {
+  sourceDims: Dimensions,
+  targetDims: Dimensions,
+  alignCorners: boolean
+) {
   const sWidth = sourceDims.width;
   const sHeight = sourceDims.height;
   const tWidth = targetDims.width;
   const tHeight = targetDims.height;
 
   const effectiveInSize: [number, number] = [
-    (alignCorners && tWidth > 1) ? sWidth - 1 : sWidth,
-    (alignCorners && tHeight > 1) ? sHeight - 1 : sHeight,
+    alignCorners && tWidth > 1 ? sWidth - 1 : sWidth,
+    alignCorners && tHeight > 1 ? sHeight - 1 : sHeight,
   ];
 
   const effectiveOutSize: [number, number] = [
-    (alignCorners && tWidth > 1) ? tWidth - 1 : tWidth,
-    (alignCorners && tHeight > 1) ? tHeight - 1 : tHeight,
+    alignCorners && tWidth > 1 ? tWidth - 1 : tWidth,
+    alignCorners && tHeight > 1 ? tHeight - 1 : tHeight,
   ];
 
-  const roundBase = alignCorners ? '0.5' : '0.0';
+  const roundBase = alignCorners ? "0.5" : "0.0";
 
-  const outputFragType = targetDims.depth === 3 ? 'vec3' : 'vec4';
+  const outputFragType = targetDims.depth === 3 ? "vec3" : "vec4";
   const outputFragColor =
-      targetDims.depth === 3 ? 'vec3(texSample)' : 'texSample';
+    targetDims.depth === 3 ? "vec3(texSample)" : "texSample";
 
   const source = `#version 300 es
 precision highp float;
@@ -94,12 +108,18 @@ void main() {
 export function vertices() {
   return new Float32Array([
     // clang-format off
-    -1, -1,
-    -1, 1,
-    1, 1,
-    1, 1,
-    -1, -1,
-    1, -1,
+    -1,
+    -1,
+    -1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    -1,
+    -1,
+    1,
+    -1,
     // clang-format on
   ]);
 }
@@ -107,12 +127,18 @@ export function vertices() {
 export function texCoords() {
   return new Float32Array([
     // clang-format off
-    0, 0,
-    0, 1,
-    1, 1,
-    1, 1,
-    0, 0,
-    1, 0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
     // clang-format on
   ]);
 }

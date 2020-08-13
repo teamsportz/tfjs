@@ -15,14 +15,16 @@
  * =============================================================================
  */
 
-import {webgl_util} from '@tensorflow/tfjs-backend-webgl';
-import * as tf from '@tensorflow/tfjs-core';
+import { webgl_util } from "@tensorflow/tfjs-backend-webgl";
+import * as tf from "@tensorflow/tfjs-core";
 
-import {getDebugMode} from '../platform_react_native';
+import { getDebugMode } from "../platform_react_native";
 
-import * as drawTextureProgramInfo from './draw_texture_program_info';
-import * as resizeBilinearProgramInfo from './resize_bilinear_program_info';
-import * as resizeNNProgramInfo from './resize_nearest_neigbor_program_info';
+import * as drawTextureProgramInfo from "./draw_texture_program_info";
+import * as resizeBilinearProgramInfo from "./resize_bilinear_program_info";
+import * as resizeNNProgramInfo from "./resize_nearest_neigbor_program_info";
+
+export type Rotation = 0 | 90 | 180 | 270 | 360 | -80 | -180 | -270;
 
 interface Dimensions {
   width: number;
@@ -35,8 +37,10 @@ const fboCache = new WeakMap<WebGL2RenderingContext, WebGLFramebuffer>();
 
 // Internal target texture used for resizing camera texture input
 const resizeTextureCache = new WeakMap<WebGL2RenderingContext, WebGLTexture>();
-const resizeTextureDimsCache =
-    new WeakMap<WebGL2RenderingContext, {width: number, height: number}>();
+const resizeTextureDimsCache = new WeakMap<
+  WebGL2RenderingContext,
+  { width: number; height: number }
+>();
 
 interface ProgramObjects {
   program: WebGLProgram;
@@ -46,9 +50,10 @@ interface ProgramObjects {
 }
 
 // Cache for shader programs and associated vertex array buffers.
-const programCacheByContext:
-    WeakMap<WebGL2RenderingContext, Map<string, ProgramObjects>> =
-        new WeakMap();
+const programCacheByContext: WeakMap<
+  WebGL2RenderingContext,
+  Map<string, ProgramObjects>
+> = new WeakMap();
 
 /**
  * Download data from an texture.
@@ -58,9 +63,11 @@ const programCacheByContext:
  * @param dims
  */
 export function downloadTextureData(
-    gl: WebGL2RenderingContext, texture: WebGLTexture,
-    dims: Dimensions): Uint8Array {
-  const {width, height, depth} = dims;
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  dims: Dimensions
+): Uint8Array {
+  const { width, height, depth } = dims;
   const pixels = new Uint8Array(width * height * depth);
 
   if (!fboCache.has(gl)) {
@@ -82,7 +89,12 @@ export function downloadTextureData(
   webgl_util.callAndCheck(gl, debugMode, () => {
     const level = 0;
     gl.framebufferTexture2D(
-        gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, level);
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      texture,
+      level
+    );
   });
 
   webgl_util.callAndCheck(gl, debugMode, () => {
@@ -109,15 +121,18 @@ export function downloadTextureData(
  *     texture will be returned
  */
 export function uploadTextureData(
-    imageData: Uint8Array, gl: WebGL2RenderingContext, dims: Dimensions,
-    texture?: WebGLTexture): WebGLTexture {
+  imageData: Uint8Array,
+  gl: WebGL2RenderingContext,
+  dims: Dimensions,
+  texture?: WebGLTexture
+): WebGLTexture {
   const targetTextureWidth = dims.width;
   const targetTextureHeight = dims.height;
 
   tf.util.assert(
-      targetTextureWidth * targetTextureHeight * dims.depth ===
-          imageData.length,
-      () => 'uploadTextureData Error: imageData length must match w * h * d');
+    targetTextureWidth * targetTextureHeight * dims.depth === imageData.length,
+    () => "uploadTextureData Error: imageData length must match w * h * d"
+  );
 
   const targetTexture = texture || gl.createTexture();
   gl.activeTexture(gl.TEXTURE0);
@@ -138,8 +153,16 @@ export function uploadTextureData(
 
   webgl_util.callAndCheck(gl, debugMode, () => {
     gl.texImage2D(
-        gl.TEXTURE_2D, level, internalFormat, targetTextureWidth,
-        targetTextureHeight, border, format, type, imageData);
+      gl.TEXTURE_2D,
+      level,
+      internalFormat,
+      targetTextureWidth,
+      targetTextureHeight,
+      border,
+      format,
+      type,
+      imageData
+    );
   });
 
   gl.bindTexture(gl.TEXTURE_2D, null);
@@ -154,16 +177,23 @@ export function uploadTextureData(
  * @param dims texture size
  */
 export function drawTexture(
-    gl: WebGL2RenderingContext, texture: WebGLTexture,
-    dims: {width: number, height: number}, flipHorizontal: boolean) {
-  const {program, vao, vertices, uniformLocations} =
-      drawTextureProgram(gl, flipHorizontal);
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  dims: { width: number; height: number },
+  flipHorizontal: boolean,
+  rotation: Rotation
+) {
+  const { program, vao, vertices, uniformLocations } = drawTextureProgram(
+    gl,
+    flipHorizontal,
+    rotation
+  );
   gl.useProgram(program);
   gl.bindVertexArray(vao);
 
   // Set texture sampler uniform
   const TEXTURE_UNIT = 0;
-  gl.uniform1i(uniformLocations.get('inputTexture'), TEXTURE_UNIT);
+  gl.uniform1i(uniformLocations.get("inputTexture"), TEXTURE_UNIT);
   gl.activeTexture(gl.TEXTURE0 + TEXTURE_UNIT);
   gl.bindTexture(gl.TEXTURE_2D, texture);
 
@@ -180,13 +210,24 @@ export function drawTexture(
 }
 
 export function runResizeProgram(
-    gl: WebGL2RenderingContext, inputTexture: WebGLTexture,
-    inputDims: Dimensions, outputDims: Dimensions, alignCorners: boolean,
-    interpolation: 'nearest_neighbor'|'bilinear') {
+  gl: WebGL2RenderingContext,
+  inputTexture: WebGLTexture,
+  inputDims: Dimensions,
+  outputDims: Dimensions,
+  alignCorners: boolean,
+  interpolation: "nearest_neighbor" | "bilinear",
+  rotation: number
+) {
   const debugMode = getDebugMode();
 
-  const {program, vao, vertices, uniformLocations} =
-      resizeProgram(gl, inputDims, outputDims, alignCorners, interpolation);
+  const { program, vao, vertices, uniformLocations } = resizeProgram(
+    gl,
+    inputDims,
+    outputDims,
+    alignCorners,
+    interpolation,
+    rotation
+  );
   gl.useProgram(program);
   // Set up geometry
   webgl_util.callAndCheck(gl, debugMode, () => {
@@ -196,7 +237,7 @@ export function runResizeProgram(
   //
   // Set up input texture
   //
-  gl.uniform1i(uniformLocations.get('inputTexture'), 1);
+  gl.uniform1i(uniformLocations.get("inputTexture"), 1);
   gl.activeTexture(gl.TEXTURE0 + 1);
   gl.bindTexture(gl.TEXTURE_2D, inputTexture);
 
@@ -222,13 +263,15 @@ export function runResizeProgram(
 
   // Reallocate texture storage if target size has changed.
   if (!resizeTextureDimsCache.has(gl)) {
-    resizeTextureDimsCache.set(gl, {width: -1, height: -1});
+    resizeTextureDimsCache.set(gl, { width: -1, height: -1 });
   }
   const resizeTextureDims = resizeTextureDimsCache.get(gl);
 
-  if (resizeTextureDims == null ||
-      resizeTextureDims.width !== targetTextureWidth ||
-      resizeTextureDims.height !== targetTextureHeight) {
+  if (
+    resizeTextureDims == null ||
+    resizeTextureDims.width !== targetTextureWidth ||
+    resizeTextureDims.height !== targetTextureHeight
+  ) {
     const level = 0;
     const format = outputDims.depth === 3 ? gl.RGB : gl.RGBA;
     const internalFormat = format;
@@ -237,12 +280,22 @@ export function runResizeProgram(
 
     webgl_util.callAndCheck(gl, debugMode, () => {
       gl.texImage2D(
-          gl.TEXTURE_2D, level, internalFormat, targetTextureWidth,
-          targetTextureHeight, border, format, type, null);
+        gl.TEXTURE_2D,
+        level,
+        internalFormat,
+        targetTextureWidth,
+        targetTextureHeight,
+        border,
+        format,
+        type,
+        null
+      );
     });
 
-    resizeTextureDimsCache.set(
-        gl, {width: targetTextureWidth, height: targetTextureHeight});
+    resizeTextureDimsCache.set(gl, {
+      width: targetTextureWidth,
+      height: targetTextureHeight,
+    });
   }
 
   //
@@ -256,33 +309,43 @@ export function runResizeProgram(
   gl.viewport(0, 0, targetTextureWidth, targetTextureHeight);
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(
-      gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTexture, 0);
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    targetTexture,
+    0
+  );
 
   const fboComplete = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
   if (fboComplete !== gl.FRAMEBUFFER_COMPLETE) {
     switch (fboComplete) {
       case gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
         throw new Error(
-            'createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT');
+          "createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT"
+        );
 
       case gl.FRAMEBUFFER_UNSUPPORTED:
-        throw new Error('createFrameBuffer: gl.FRAMEBUFFER_UNSUPPORTED');
+        throw new Error("createFrameBuffer: gl.FRAMEBUFFER_UNSUPPORTED");
 
       case gl.FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
         throw new Error(
-            'createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT');
+          "createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT"
+        );
 
       case gl.FRAMEBUFFER_INCOMPLETE_DIMENSIONS:
         throw new Error(
-            'createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_DIMENSIONS');
+          "createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_DIMENSIONS"
+        );
 
       case gl.FRAMEBUFFER_INCOMPLETE_MULTISAMPLE:
         throw new Error(
-            'createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_MULTISAMPLE');
+          "createFrameBuffer: gl.FRAMEBUFFER_INCOMPLETE_MULTISAMPLE"
+        );
       default:
         throw new Error(
-            'createFrameBuffer Error: Other or unknown fbo complete status: ' +
-            `${fboComplete}`);
+          "createFrameBuffer Error: Other or unknown fbo complete status: " +
+            `${fboComplete}`
+        );
     }
   }
 
@@ -298,29 +361,39 @@ export function runResizeProgram(
 function createFrameBuffer(gl: WebGL2RenderingContext): WebGLFramebuffer {
   const fb = gl.createFramebuffer();
   if (fb == null) {
-    throw new Error('Could not create framebuffer');
+    throw new Error("Could not create framebuffer");
   }
   return fb;
 }
 
 function drawTextureProgram(
-    gl: WebGL2RenderingContext, flipHorizontal: boolean): ProgramObjects {
+  gl: WebGL2RenderingContext,
+  flipHorizontal: boolean,
+  rotation: Rotation
+): ProgramObjects {
   if (!programCacheByContext.has(gl)) {
     programCacheByContext.set(gl, new Map());
   }
   const programCache = programCacheByContext.get(gl);
 
-  const cacheKey = `drawTexture_${flipHorizontal}`;
+  const cacheKey = `drawTexture_${flipHorizontal}_${rotation}`;
   if (!programCache.has(cacheKey)) {
-    const vertSource =
-        drawTextureProgramInfo.vertexShaderSource(flipHorizontal);
+    const vertSource = drawTextureProgramInfo.vertexShaderSource(
+      flipHorizontal,
+      rotation
+    );
     const fragSource = drawTextureProgramInfo.fragmentShaderSource();
 
     const vertices = drawTextureProgramInfo.vertices();
     const texCoords = drawTextureProgramInfo.texCoords();
 
-    const programObjects =
-        createProgramObjects(gl, vertSource, fragSource, vertices, texCoords);
+    const programObjects = createProgramObjects(
+      gl,
+      vertSource,
+      fragSource,
+      vertices,
+      texCoords
+    );
 
     programCache.set(cacheKey, programObjects);
   }
@@ -328,33 +401,46 @@ function drawTextureProgram(
 }
 
 function resizeProgram(
-    gl: WebGL2RenderingContext, sourceDims: Dimensions, targetDims: Dimensions,
-    alignCorners: boolean,
-    interpolation: 'nearest_neighbor'|'bilinear'): ProgramObjects {
+  gl: WebGL2RenderingContext,
+  sourceDims: Dimensions,
+  targetDims: Dimensions,
+  alignCorners: boolean,
+  interpolation: "nearest_neighbor" | "bilinear",
+  rotation: number
+): ProgramObjects {
   if (!programCacheByContext.has(gl)) {
     programCacheByContext.set(gl, new Map());
   }
   const programCache = programCacheByContext.get(gl);
 
-  const cacheKey = `resize_${sourceDims.width}_${sourceDims.height}_${
-      sourceDims.depth}_${targetDims.width}_${targetDims.height}_${
-      targetDims.depth}_${alignCorners}_${interpolation}`;
+  const cacheKey = `resize_${sourceDims.width}_${sourceDims.height}_${sourceDims.depth}_${targetDims.width}_${targetDims.height}_${targetDims.depth}_${alignCorners}_${interpolation}_${rotation}`;
 
   if (!programCache.has(cacheKey)) {
-    const vertSource = resizeNNProgramInfo.vertexShaderSource();
+    const vertSource = resizeNNProgramInfo.vertexShaderSource(rotation);
     let fragSource: string;
-    if (interpolation === 'nearest_neighbor') {
+    if (interpolation === "nearest_neighbor") {
       fragSource = resizeNNProgramInfo.fragmentShaderSource(
-          sourceDims, targetDims, alignCorners);
+        sourceDims,
+        targetDims,
+        alignCorners
+      );
     } else {
       fragSource = resizeBilinearProgramInfo.fragmentShaderSource(
-          sourceDims, targetDims, alignCorners);
+        sourceDims,
+        targetDims,
+        alignCorners
+      );
     }
 
     const vertices = resizeNNProgramInfo.vertices();
     const texCoords = resizeNNProgramInfo.texCoords();
-    const programObjects =
-        createProgramObjects(gl, vertSource, fragSource, vertices, texCoords);
+    const programObjects = createProgramObjects(
+      gl,
+      vertSource,
+      fragSource,
+      vertices,
+      texCoords
+    );
 
     programCache.set(cacheKey, programObjects);
   }
@@ -362,9 +448,12 @@ function resizeProgram(
 }
 
 function createProgramObjects(
-    gl: WebGL2RenderingContext, vertexShaderSource: string,
-    fragmentShaderSource: string, vertices: Float32Array,
-    texCoords: Float32Array): ProgramObjects {
+  gl: WebGL2RenderingContext,
+  vertexShaderSource: string,
+  fragmentShaderSource: string,
+  vertices: Float32Array,
+  texCoords: Float32Array
+): ProgramObjects {
   const debugMode = getDebugMode();
   const vertShader = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vertShader, vertexShaderSource);
@@ -386,7 +475,7 @@ function createProgramObjects(
 
   // Set up geometry
   webgl_util.callAndCheck(gl, debugMode, () => {
-    const positionAttrib = gl.getAttribLocation(program, 'position');
+    const positionAttrib = gl.getAttribLocation(program, "position");
     const vertsCoordsBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vertsCoordsBuffer);
     gl.enableVertexAttribArray(positionAttrib);
@@ -396,7 +485,7 @@ function createProgramObjects(
   });
 
   webgl_util.callAndCheck(gl, debugMode, () => {
-    const texCoordsAttrib = gl.getAttribLocation(program, 'texCoords');
+    const texCoordsAttrib = gl.getAttribLocation(program, "texCoords");
     const texCoordsBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, texCoordsBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
@@ -407,8 +496,8 @@ function createProgramObjects(
 
   const uniformLocations = new Map<string, WebGLUniformLocation>();
   webgl_util.callAndCheck(gl, debugMode, () => {
-    const inputTextureLoc = gl.getUniformLocation(program, 'inputTexture');
-    uniformLocations.set('inputTexture', inputTextureLoc);
+    const inputTextureLoc = gl.getUniformLocation(program, "inputTexture");
+    uniformLocations.set("inputTexture", inputTextureLoc);
   });
 
   // Unbind

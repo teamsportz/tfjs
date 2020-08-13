@@ -15,9 +15,15 @@
  * =============================================================================
  */
 
-import * as tf from '@tensorflow/tfjs-core';
+import * as tf from "@tensorflow/tfjs-core";
 
-import {downloadTextureData, drawTexture, runResizeProgram, uploadTextureData} from './camera_webgl_util';
+import {
+  downloadTextureData,
+  drawTexture,
+  Rotation,
+  runResizeProgram,
+  uploadTextureData,
+} from "./camera_webgl_util";
 interface Dimensions {
   width: number;
   height: number;
@@ -31,13 +37,14 @@ interface Size {
 
 interface FromTextureOptions {
   alignCorners?: boolean;
-  interpolation?: 'nearest_neighbor'|'bilinear';
+  interpolation?: "nearest_neighbor" | "bilinear";
+  rotation?: Rotation;
 }
 
 const glCapabilities = {
   canDownloadFromRGBTexture: new WeakMap<WebGL2RenderingContext, boolean>(),
   // Has detectGLCapabilities been run on a particular GL context;
-  glCapabilitiesTested: new WeakMap<WebGL2RenderingContext, boolean>()
+  glCapabilitiesTested: new WeakMap<WebGL2RenderingContext, boolean>(),
 };
 
 /**
@@ -63,22 +70,44 @@ export async function detectGLCapabilities(gl: WebGL2RenderingContext) {
 
   try {
     const height = 2;
-    const width = 4;  // This must be a multiple of 4.
+    const width = 4; // This must be a multiple of 4.
     const data = new Uint8Array(height * width * 4);
     for (let i = 0; i < data.length; i++) {
       data[i] = i;
     }
-    const sourceDims = {height, width, depth: 4};
+    const sourceDims = { height, width, depth: 4 };
     const tex = uploadTextureData(data, gl, sourceDims);
 
-    const targetDims = {height, width, depth: 3};
+    const targetDims = { height, width, depth: 3 };
     const downloaded = fromTexture(gl, tex, sourceDims, targetDims);
     const downloadedData = await downloaded.data();
     tf.dispose(downloaded);
 
     const matches = tf.util.arraysEqual(downloadedData, [
-      0,  1,  2,  4,  5,  6,  8,  9,  10, 12, 13, 14,
-      16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      8,
+      9,
+      10,
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      20,
+      21,
+      22,
+      24,
+      25,
+      26,
+      28,
+      29,
+      30,
     ]);
 
     if (matches) {
@@ -103,13 +132,19 @@ export async function detectGLCapabilities(gl: WebGL2RenderingContext) {
  */
 /** @doc {heading: 'Media', subheading: 'Camera'} */
 export async function toTexture(
-    gl: WebGL2RenderingContext, imageTensor: tf.Tensor3D,
-    texture?: WebGLTexture): Promise<WebGLTexture> {
+  gl: WebGL2RenderingContext,
+  imageTensor: tf.Tensor3D,
+  texture?: WebGLTexture
+): Promise<WebGLTexture> {
   tf.util.assert(
-      imageTensor.dtype === 'int32', () => 'imageTensor must be of type int32');
+    imageTensor.dtype === "int32",
+    () => "imageTensor must be of type int32"
+  );
 
   tf.util.assert(
-      imageTensor.rank === 3, () => 'imageTensor must be a Tensor3D');
+    imageTensor.rank === 3,
+    () => "imageTensor must be a Tensor3D"
+  );
 
   const imageData = Uint8Array.from(await imageTensor.data());
   const dims = {
@@ -136,11 +171,16 @@ export async function toTexture(
  */
 /** @doc {heading: 'Media', subheading: 'Camera'} */
 export function fromTexture(
-    gl: WebGL2RenderingContext, texture: WebGLTexture, sourceDims: Dimensions,
-    targetShape: Dimensions, options: FromTextureOptions = {}): tf.Tensor3D {
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  sourceDims: Dimensions,
+  targetShape: Dimensions,
+  options: FromTextureOptions = {}
+): tf.Tensor3D {
   tf.util.assert(
-      targetShape.depth === 3 || targetShape.depth === 4,
-      () => 'fromTexture Error: target depth must be 3 or 4');
+    targetShape.depth === 3 || targetShape.depth === 4,
+    () => "fromTexture Error: target depth must be 3 or 4"
+  );
 
   if (targetShape.depth === 3 && targetShape.width % 4 !== 0) {
     // We throw an error here rather than use the CPU workaround as the user is
@@ -152,15 +192,16 @@ export function fromTexture(
       // is not supported on expo. "EXGL: gl.pixelStorei() doesn't support this
       // parameter yet!"
       throw new Error(
-          'When using targetShape.depth=3, targetShape.width must be' +
-          ' a multiple of 4. Alternatively do not call detectGLCapabilities()');
+        "When using targetShape.depth=3, targetShape.width must be" +
+          " a multiple of 4. Alternatively do not call detectGLCapabilities()"
+      );
     }
   }
 
   const originalTargetDepth = targetShape.depth;
-  const targetDepth = glCapabilities.canDownloadFromRGBTexture.get(gl) ?
-      originalTargetDepth :
-      4;
+  const targetDepth = glCapabilities.canDownloadFromRGBTexture.get(gl)
+    ? originalTargetDepth
+    : 4;
 
   sourceDims = {
     height: Math.floor(sourceDims.height),
@@ -171,23 +212,41 @@ export function fromTexture(
   targetShape = {
     height: Math.floor(targetShape.height),
     width: Math.floor(targetShape.width),
-    depth: targetDepth
+    depth: targetDepth,
   };
 
   const alignCorners =
-      options.alignCorners != null ? options.alignCorners : false;
+    options.alignCorners != null ? options.alignCorners : false;
   const interpolation =
-      options.interpolation != null ? options.interpolation : 'bilinear';
+    options.interpolation != null ? options.interpolation : "bilinear";
+  const rotation = options.rotation != null ? options.rotation : 0;
 
   tf.util.assert(
-      interpolation === 'bilinear' || interpolation === 'nearest_neighbor',
-      () => 'fromTexture Error: interpolation must be one of' +
-          ' "bilinear" or "nearest_neighbor"');
+    interpolation === "bilinear" || interpolation === "nearest_neighbor",
+    () =>
+      "fromTexture Error: interpolation must be one of" +
+      ' "bilinear" or "nearest_neighbor"'
+  );
+
+  tf.util.assert(
+    [0, 90, 180, 270, 360, -90, -180, -270].includes(rotation),
+    () => "fromTexture Error: rotation must be 0, 90, 180, 270 or 360"
+  );
 
   const resizedTexture = runResizeProgram(
-      gl, texture, sourceDims, targetShape, alignCorners, interpolation);
-  const downloadedTextureData =
-      downloadTextureData(gl, resizedTexture, targetShape);
+    gl,
+    texture,
+    sourceDims,
+    targetShape,
+    alignCorners,
+    interpolation,
+    rotation
+  );
+  const downloadedTextureData = downloadTextureData(
+    gl,
+    resizedTexture,
+    targetShape
+  );
 
   let finalTexData;
   if (originalTargetDepth !== targetDepth && originalTargetDepth === 3) {
@@ -208,8 +267,10 @@ export function fromTexture(
   }
 
   return tf.tensor3d(
-      finalTexData,
-      [targetShape.height, targetShape.width, originalTargetDepth], 'int32');
+    finalTexData,
+    [targetShape.height, targetShape.width, originalTargetDepth],
+    "int32"
+  );
 }
 
 /**
@@ -222,11 +283,20 @@ export function fromTexture(
  */
 /** @doc {heading: 'Media', subheading: 'Camera'} */
 export function renderToGLView(
-    gl: WebGL2RenderingContext, texture: WebGLTexture, size: Size,
-    flipHorizontal = true) {
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  size: Size,
+  flipHorizontal = true,
+  rotation: Rotation
+) {
   size = {
     width: Math.floor(size.width),
     height: Math.floor(size.height),
   };
-  drawTexture(gl, texture, size, flipHorizontal);
+  tf.util.assert(
+    [0, 90, 180, 270, 360, -90, -180, -270].includes(rotation),
+    () => "renderToGLView Error: rotation must be 0, 90, 180, 270 or 360"
+  );
+
+  drawTexture(gl, texture, size, flipHorizontal, rotation);
 }
