@@ -15,8 +15,9 @@
  * =============================================================================
  */
 
-export function vertexShaderSource(flipHorizontal: boolean) {
+export function vertexShaderSource(flipHorizontal: boolean, rotation: number) {
   const horizontalScale = flipHorizontal ? -1 : 1;
+  const rotateAngle = rotation === 0 ? "0." : rotation * (Math.PI / 180);
   return `#version 300 es
 precision highp float;
 
@@ -25,10 +26,20 @@ in vec2 texCoords;
 
 out vec2 uv;
 
+vec2 rotate(vec2 uvCoods, vec2 pivot, float rotation) {
+  float cosa = cos(rotation);
+  float sina = sin(rotation);
+  uvCoods -= pivot;
+  return vec2(
+      cosa * uvCoods.x - sina * uvCoods.y,
+      cosa * uvCoods.y + sina * uvCoods.x
+  ) + pivot;
+}
+
 void main() {
+  uv = rotate(texCoords, vec2(0.5), ${rotateAngle});
   // Invert geometry to match the image orientation from the camera.
   gl_Position = vec4(position * vec2(${horizontalScale}., -1.), 0, 1);
-  uv = texCoords;
 }`;
 }
 
@@ -47,12 +58,18 @@ void main() {
 export function vertices() {
   return new Float32Array([
     // clang-format off
-    -1, -1,
-    -1, 1,
-    1, 1,
-    1, 1,
-    -1, -1,
-    1, -1,
+    -1,
+    -1,
+    -1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    -1,
+    -1,
+    1,
+    -1,
     // clang-format on
   ]);
 }
@@ -60,12 +77,18 @@ export function vertices() {
 export function texCoords() {
   return new Float32Array([
     // clang-format off
-    0, 0,
-    0, 1,
-    1, 1,
-    1, 1,
-    0, 0,
-    1, 0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
     // clang-format on
   ]);
 }
